@@ -2,7 +2,9 @@
 #ifndef _EVIL_H_
 #define _EVIL_H_
 
-#include "utility.h"
+#include <xcb/xcb.h>
+
+#include "evil/utility.h"
 #include "evil/vulkan_utility.h"
 #include "evil/datatypes.h"
 
@@ -15,17 +17,23 @@ VkResult ezCreateInstance(VkInstance* es);
 VkResult eCreateWindow(VkExtent2D* extent, EWindowState* w);
 VkResult ezCreateQuadVertexBuffer(EState* es, VkBuffer* w);
 VkResult ezCreatePipeline(EState* es, VkPipeline* pipeline);
+VkResult ezCreateSwapchainImageViews(EState* es);
+VkResult ezDraw(EState* es);
+VkResult ezPrepareFrame(EState* es, VkCommandBuffer command_buffer, uint32_t image_index, VkFramebuffer* framebuffer);
 EResult eChoosePhysicalDevice(const EDeviceRequirements* req, EState* e);
 VkResult eCreatePresentSurface(EState* es, EWindowState* w);
 EResult eChooseQueueFamily(EState* es);
 EResult eCreateLogicalDevice(EState* es, EExtras* extras);
-void eGetQueue(VkDevice device, uint32_t queue_family, uint32_t queue_index, VkQueue* queue);
+VkQueue eGetQueue(VkDevice device, uint32_t queue_family, uint32_t queue_index);
 VkResult eCreateSemaphore(VkDevice device, VkSemaphore* semaphore);
-VkResult eCreateFence(VkDevice device, VkSemaphore* semaphore, int signaled);
+VkResult eCreateFence(VkDevice device, VkFence* semaphore, int signaled);
 VkResult eCreateSwapchain(ECSwapchain* swapchain_ci, VkSwapchainKHR* swapchain);
 VkResult eCreateRenderPass(ECRenderPass* render_pass_ci, VkRenderPass* render_pass);
 VkShaderModule eCreateShaderModuleFromFile(VkDevice device, const char* filename);
 VkResult eAllocateBufferMemory(VkPhysicalDevice physical_device, VkDevice device, VkBuffer buffer, VkDeviceMemory* memory);
+VkResult eCreateCommandPool(VkDevice device, uint32_t queue_family_index, VkCommandPool* command_pool);
+VkResult eAllocatePrimaryCommandBuffers(VkDevice device, VkCommandPool pool, uint32_t count, VkCommandBuffer* buffers);
+VkResult eCreateImageViews(VkDevice device, VkSwapchainKHR swapchain, VkFormat format, uint32_t count, VkImageView* views);
 
 #ifdef __cplusplus
 } // extern "C"

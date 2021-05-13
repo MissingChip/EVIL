@@ -32,11 +32,12 @@ unstruct(EFrameResources);
 
 struct EState {
     VkInstance instance;
-    float width, height;
+    VkExtent2D extent;
     VkPhysicalDevice physical_device;
     VkDevice device;
     VkSwapchainKHR swapchain;
     VkSurfaceKHR surface;
+    VkSurfaceFormatKHR surface_format;
     uint32_t graphics_queue_family;
     uint32_t present_queue_family;
     EGraphicsPresent queues;
@@ -48,6 +49,7 @@ struct EState {
     VkCommandPool command_pool;
     uint32_t nframe_resources;
     EFrameResources frame_resources[FRAME_RESOURCE_COUNT];
+    VkImageView image_views[16];
 };
 unstruct(EState);
 
@@ -55,6 +57,7 @@ struct EWindowState {
     xcb_connection_t* connection;
     xcb_window_t window;
     xcb_intern_atom_reply_t* delete_window_atom;
+    VkExtent2D extent;
 };
 unstruct(EWindowState);
 

@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <string.h>
 #include <sys/stat.h>
 
 #include "evil.h"
@@ -23,6 +24,65 @@ const char* ez_required_instance_layers[] = {
 };
 const uint32_t ez_required_instance_layer_count = arraysize(ez_required_instance_layers);
 
+const char* ez_required_device_extensions[] = {
+    VK_KHR_SWAPCHAIN_EXTENSION_NAME
+};
+const uint32_t ez_required_device_extension_count = arraysize(ez_required_device_extensions);
+
+struct VertexData {
+    float   x, y, z, w;
+    float   r, g, b, a;
+};
+unstruct(VertexData);
+
+VkResult ezInitialize(EState* es, EWindowState* w){
+    VkResult r;
+    memset(es, 0, sizeof(*es));
+    es->extent = w->extent;
+    es->nframe_resources = FRAME_RESOURCE_COUNT;
+    ezCreateInstance(&es->instance);
+    eCreatePresentSurface(es, w);
+    EDeviceRequirements device_requirements = {
+        .prefer_discrete = 1.0,
+        .require_swapchain = 1
+    };
+    eChoosePhysicalDevice(&device_requirements, es);
+    eChooseQueueFamily(es);
+    EExtras device_extensions = {
+        .extension_count = ez_required_device_extension_count,
+        .extensions = ez_required_device_extensions
+    };
+    eCreateLogicalDevice(es, &device_extensions);
+    ECSwapchain swapchain_ci = {
+        .physical_device = es->physical_device,
+        .device = es->device,
+        .surface = es->surface,
+        .extent = es->extent,
+        .present_mode = VK_PRESENT_MODE_MAILBOX_KHR,
+        .image_count = 3,
+        .format = { VK_FORMAT_R8G8B8A8_UNORM, VK_COLORSPACE_SRGB_NONLINEAR_KHR },
+        .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .sharing_mode = VK_SHARING_MODE_EXCLUSIVE,
+        .old_swapchain = NULL
+    };
+    eCreateSwapchain(&swapchain_ci, &es->swapchain);
+    es->surface_format = swapchain_ci.format;
+    ezCreateSwapchainImageViews(es);
+    ECRenderPass render_pass_ci = {
+        .device = es->device,
+        .format = swapchain_ci.format.format
+    };
+    eCreateRenderPass(&render_pass_ci, &es->render_pass);
+    ezCreatePipeline(es, &es->pipeline);
+    ezCreateQuadVertexBuffer(es, &es->vertex_buffer);
+    eCreateCommandPool( es->device, es->graphics_queue_family, &es->command_pool );
+    for(int i = 0; i < es->nframe_resources; i++){
+        eCreateSemaphore(es->device, &es->frame_resources[i].available_semaphore);
+        eCreateSemaphore(es->device, &es->frame_resources[i].finished_semaphore);
+        eCreateFence(es->device, &es->frame_resources[i].fence, 1);
+        eAllocatePrimaryCommandBuffers(es->device, es->command_pool, 1, &es->frame_resources[i].command_buffer);
+    }
+}
 
 EResult eCheckForInstanceExtensions(uint32_t extension_count, const char* instance_extensions[]){
     uint32_t available_count = 0;
@@ -43,7 +103,7 @@ EResult eCheckForInstanceLayers(uint32_t layer_count, const char* instance_layer
     uint32_t available_count = 0;
     vkEnumerateInstanceLayerProperties( &available_count, NULL);
     VkExtensionProperties layer_properties[available_count];
-    vkEnumerateInstanceLayerProperties(&available_count, layer_properties);
+    vkEnumerateInstanceExtensionProperties( NULL, &available_count, layer_properties );
     for(uint32_t i = 0; i < layer_count; i++){
         for(uint32_t j = 0; j < available_count; j++){
             if(strcmp(instance_layers[i], layer_properties[j].extensionName) == 0){
@@ -76,49 +136,9 @@ VkResult ezCreateInstance(VkInstance* v){
     return vkCreateInstance(&instance_ci, NULL, v);
 }
 
-VkResult ezInitialize(EState* es, EWindowState* w){
-    es->nframe_resources = FRAME_RESOURCE_COUNT;
-    if(es->instance != VK_NULL_HANDLE){
-        ezCreateInstance(&es->instance);
-    }
-    EDeviceRequirements device_requirements = {
-        .prefer_discrete = 1.0,
-        .require_swapchain = 1
-    };
-    eChoosePhysicalDevice(&device_requirements, es);
-    eChooseQueueFamily(es);
-    eCreateLogicalDevice(es, NULL);
-    eCreatePresentSurface(es, w);
-    ECSwapchain swapchain_ci = {
-        .physical_device = es->physical_device,
-        .device = es->device,
-        .surface = es->surface,
-        .extent = {es->width, es->height},
-        .present_mode = VK_PRESENT_MODE_MAILBOX_KHR,
-        .image_count = 3,
-        .format = { VK_FORMAT_R8G8B8A8_UNORM, VK_COLORSPACE_SRGB_NONLINEAR_KHR },
-        .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-        .sharing_mode = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-        .old_swapchain = NULL
-    };
-    eCreateSwapchain(&swapchain_ci, &es->swapchain);
-    ECRenderPass render_pass_ci = {
-        .device = es->device,
-        .format = swapchain_ci.format.format
-    };
-    eCreateRenderPass(&render_pass_ci, &es->render_pass);
-    ezCreatePipeline(es, &es->pipeline);
-    eCreateCommandPool( es->graphics_queue_family, es->command_pool );
-    for(int i = 0; i < es->nframe_resources; i++){
-        eCreateSemaphore(es->device, &es->frame_resources[i].available_semaphore);
-        eCreateSemaphore(es->device, &es->frame_resources[i].finished_semaphore);
-        eCreateFence(es->device, &es->frame_resources[i].fence, 1);
-        eAllocateCommandBuffer(es->device, &es->frame_resources[i].command_buffer);
-    }
-}
-
 VkShaderModule eCreateShaderModuleFromFile(VkDevice device, const char* filename){
     FILE* file = fopen(filename, "r");
+    if(!file) return VK_NULL_HANDLE;
     struct stat stats;
     fstat(fileno(file), &stats);
     size_t codesize = stats.st_size;
@@ -132,14 +152,20 @@ VkShaderModule eCreateShaderModuleFromFile(VkDevice device, const char* filename
     VkResult r;
     VkShaderModule shader_module;
     r = vkCreateShaderModule(device, &shader_module_create_info, NULL, &shader_module);
-    VV(r) VERR("Failed creating shader module %s", filename);
+    VV(r) return VK_NULL_HANDLE;
     return shader_module;
+}
+
+VkResult ezCreateSwapchainImageViews(EState* es){
+    uint32_t image_count = 0;
+    vkGetSwapchainImagesKHR(es->device, es->swapchain, &image_count, NULL);
+    return eCreateImageViews(es->device, es->swapchain, es->surface_format.format, image_count, es->image_views);
 }
 
 VkResult ezCreatePipeline(EState* es, VkPipeline* pipeline){
     VkResult r;
-    VkShaderModule vert = eCreateShaderModule("vert.spv");
-    VkShaderModule frag = eCreateShaderModule("frag.spv");
+    VkShaderModule vert = eCreateShaderModuleFromFile(es->device, "vert.spv");
+    VkShaderModule frag = eCreateShaderModuleFromFile(es->device, "frag.spv");
 
     VkPipelineShaderStageCreateInfo shader_stage_create_infos[] = {
         {
@@ -260,7 +286,7 @@ VkResult ezCreatePipeline(EState* es, VkPipeline* pipeline){
     };
     VkPipelineLayout pipeline_layout;
     r = vkCreatePipelineLayout( es->device, &layout_create_info, NULL, &pipeline_layout);
-    VV(r) VERR("Could not create pipeline layout");
+    VV(r) return r;
 
     VkGraphicsPipelineCreateInfo pipeline_create_info = {
         VSTRUCTC(GRAPHICS_PIPELINE)
@@ -282,11 +308,186 @@ VkResult ezCreatePipeline(EState* es, VkPipeline* pipeline){
         .basePipelineIndex = -1
     };
     r = vkCreateGraphicsPipelines( es->device, VK_NULL_HANDLE, 1, &pipeline_create_info, NULL, &es->pipeline );
-    VV(r) VERR("could not create graphics pipeline");
+    VV(r) return r;
 
     vkDestroyPipelineLayout(es->device, pipeline_layout, NULL);
     vkDestroyShaderModule(es->device, vert, NULL);
     vkDestroyShaderModule(es->device, frag, NULL);
+}
+
+VkResult ezDraw(EState* es){
+    static size_t resource_index = 0;
+
+    VkResult r;
+    VkDevice device = es->device;
+    VkSwapchainKHR swapchain = es->swapchain;
+    EFrameResources* current = &es->frame_resources[resource_index];
+    uint32_t image_index;
+
+    r = vkWaitForFences( device, 1, &current->fence, VK_FALSE, 1000000000);
+    VV(r) return r;
+    vkResetFences( device, 1, &current->fence );
+    r = vkAcquireNextImageKHR( device, swapchain, UINT64_MAX, current->available_semaphore, VK_NULL_HANDLE, &image_index );
+    switch( r ) {
+      case VK_SUCCESS:
+      case VK_SUBOPTIMAL_KHR:
+        break;
+      case VK_ERROR_OUT_OF_DATE_KHR:
+        // return OnWindowSizeChanged();
+      default:
+        printf("Problem occurred during swap chain image acquisition\n");
+        return r;
+    }
+
+    r = ezPrepareFrame( es, current->command_buffer, image_index, &current->framebuffer);
+
+    resource_index = (resource_index + 1) % es->nframe_resources;
+
+    VkPipelineStageFlags wait_dst_stage_mask = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    VkSubmitInfo submit_info = {
+        VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        NULL,
+        1,
+        &current->available_semaphore,
+        &wait_dst_stage_mask,
+        1,
+        &current->command_buffer,
+        1,
+        &current->finished_semaphore
+    };
+    r = vkQueueSubmit( es->queues.graphics, 1, &submit_info, current->fence);
+    VV(r) return r;
+
+    VkPresentInfoKHR present_info = {
+        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .pNext = NULL,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &current->finished_semaphore,
+        .swapchainCount = 1,
+        .pSwapchains = &es->swapchain,
+        .pImageIndices = &image_index,
+        .pResults = NULL
+    };
+    r = vkQueuePresentKHR( es->queues.present, &present_info );
+
+    switch(r) {
+        case VK_SUCCESS:
+            break;
+        case VK_SUBOPTIMAL_KHR:
+        case VK_ERROR_OUT_OF_DATE_KHR:
+            // return eWindowSizeChan(v);
+        default:
+            printf("Unknown VKResult acquiring next image: %d", r);
+            return r;
+    }
+    return r;
+}
+
+VkResult ezPrepareFrame(EState* es, VkCommandBuffer command_buffer, uint32_t image_index, VkFramebuffer* framebuffer){
+    // VDBG("Preparing frame");
+    VkResult r;
+    uint32_t image_count = 0;
+    vkGetSwapchainImagesKHR( es->device, es->swapchain, &image_count, NULL);
+    VkImage images[image_count];
+    vkGetSwapchainImagesKHR( es->device, es->swapchain, &image_count, images);
+
+    if(*framebuffer != VK_NULL_HANDLE){
+        vkDestroyFramebuffer( es->device, *framebuffer, NULL );
+        *framebuffer = VK_NULL_HANDLE;
+    }
+
+    VkFramebufferCreateInfo framebuffer_create_info = {
+        VSTRUCTC(FRAMEBUFFER)
+        .renderPass = es->render_pass,
+        .attachmentCount = 1,
+        .pAttachments = &es->image_views[image_index],
+        .width = es->extent.width,
+        .height = es->extent.height,
+        .layers = 1
+    };
+
+    r = vkCreateFramebuffer( es->device, &framebuffer_create_info, NULL, framebuffer );
+    VV(r) return r;
+
+    VkCommandBufferBeginInfo command_buffer_begin_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .pNext = NULL,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        .pInheritanceInfo = NULL
+    };
+
+    vkBeginCommandBuffer( command_buffer, &command_buffer_begin_info );
+    VkImageSubresourceRange image_subresource_range = {
+        .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+        .baseMipLevel = 0,
+        .levelCount = 1,
+        .baseArrayLayer = 0,
+        .layerCount = 1
+    };
+
+    if( es->queues.graphics != es->queues.present ){
+        VkImageMemoryBarrier barrier_present_draw = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext = NULL,
+            .srcAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+            .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            .srcQueueFamilyIndex = es->present_queue_family,
+            .dstQueueFamilyIndex = es->graphics_queue_family,
+            .image = images[image_index],
+            .subresourceRange = image_subresource_range
+        };
+        vkCmdPipelineBarrier( command_buffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, NULL, 0, NULL, 1, &barrier_present_draw );
+    }
+    VkClearValue clear_value = {{1.0f, 0.2f, 0.5f, 0.0f}};
+    VkRenderPassBeginInfo render_pass_begin_info = {
+        .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+        .pNext = NULL,
+        .renderPass = es->render_pass,
+        .framebuffer = *framebuffer,
+        .renderArea = {
+            {0, 0},
+            es->extent
+        },
+        .clearValueCount = 1,
+        .pClearValues = &clear_value
+    };
+    vkCmdBeginRenderPass( command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE );
+    vkCmdBindPipeline( command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, es->pipeline );
+    VkViewport viewport = {
+        .x = 0,
+        .y = 0,
+        .width = es->extent.width,
+        .height = es->extent.height,
+        .minDepth = 0.0f,
+        .maxDepth = 1.0f
+    };
+    VkRect2D scissor = {
+        {0, 0}, es->extent
+    };
+    vkCmdSetViewport( command_buffer, 0, 1, &viewport );
+    vkCmdSetScissor( command_buffer, 0, 1, &scissor );
+    VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers( command_buffer, 0, 1, &es->vertex_buffer, &offset );
+    vkCmdDraw( command_buffer, 4, 1, 0, 0 );
+    vkCmdEndRenderPass( command_buffer );
+    if( es->queues.graphics != es->queues.present ){
+        VkImageMemoryBarrier barrier_present_draw = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .pNext = NULL,
+            .srcAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+            .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+            .srcQueueFamilyIndex = es->graphics_queue_family,
+            .dstQueueFamilyIndex = es->present_queue_family,
+            .image = images[image_index],
+            .subresourceRange = image_subresource_range
+        };
+        vkCmdPipelineBarrier( command_buffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, NULL, 0, NULL, 1, &barrier_present_draw );
+    }
+    return vkEndCommandBuffer( command_buffer );
 }
 
 VkResult eCreateWindow(VkExtent2D* extent, EWindowState* w){
@@ -312,6 +513,8 @@ VkResult eCreateWindow(VkExtent2D* extent, EWindowState* w){
         XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK, 
         value_list
     );
+    xcb_flush (w->connection);
+    char title[] = "Window title";
     xcb_change_property(
         w->connection,
         XCB_PROP_MODE_REPLACE,
@@ -319,10 +522,10 @@ VkResult eCreateWindow(VkExtent2D* extent, EWindowState* w){
         XCB_ATOM_WM_NAME,
         XCB_ATOM_STRING,
         8,
-        strlen( "Window title" ),
-        "Window title" );
+        strlen( title ),
+        title );
     xcb_map_window(w->connection, w->window);
-    xcb_flush (w->connection);
+    w->extent = *extent;
 }
 
 VkResult eCreatePresentSurface(EState* vs, EWindowState* w){
@@ -356,8 +559,8 @@ EResult eChoosePhysicalDevice(const EDeviceRequirements* req, EState* v){
             VkExtensionProperties extensions[extension_count];
             vkEnumerateDeviceExtensionProperties( physical_devices[i], NULL, &extension_count, extensions);
             for(int ext = 0; ext < extension_count; ext++){
-                if(strcmp(extensions[ext], VK_KHR_SWAPCHAIN_EXTENSION_NAME) == 0){
-                    found = 0;
+                if(strcmp(extensions[ext].extensionName, VK_KHR_SWAPCHAIN_EXTENSION_NAME) == 0){
+                    found = 1;
                     break;
                 }
             }
@@ -444,7 +647,7 @@ EResult eCreateLogicalDevice(EState* vs, EExtras* extras){
     vkCreateDevice( vs->physical_device, &device_ci, NULL, &vs->device);
     vkGetDeviceQueue( vs->device, vs->graphics_queue_family, 0, &vs->queues.graphics);
     if(number_of_queues > 1){
-        vkGetDevicevkGetDeviceQueueQueue( vs->device, vs->present_queue_family, 0, &vs->queues.present );
+        vkGetDeviceQueue( vs->device, vs->present_queue_family, 0, &vs->queues.present );
     }
     else{
         vs->queues.present = vs->queues.graphics;
@@ -452,8 +655,10 @@ EResult eCreateLogicalDevice(EState* vs, EExtras* extras){
     return E_SUCCESS;
 }
 
-void eGetQueue(VkDevice device, uint32_t queue_family, uint32_t queue_index, VkQueue* queue){
-    vkGetDeviceQueue( device, queue_family, queue_index, queue);
+VkQueue eGetQueue(VkDevice device, uint32_t queue_family, uint32_t queue_index){
+    VkQueue queue;
+    vkGetDeviceQueue( device, queue_family, queue_index, &queue);
+    return queue;
 }
 
 VkResult eCreateSemaphore(VkDevice device, VkSemaphore* semaphore){
@@ -463,7 +668,7 @@ VkResult eCreateSemaphore(VkDevice device, VkSemaphore* semaphore){
     return vkCreateSemaphore( device, &semaphore_create_info, NULL, semaphore);
 }
 
-VkResult eCreateFence(VkDevice device, VkSemaphore* semaphore, int signaled){
+VkResult eCreateFence(VkDevice device, VkFence* semaphore, int signaled){
     VkFenceCreateInfo fence_create_info = {
         VSTRUCTF(FENCE)
         .flags = 0
@@ -471,7 +676,7 @@ VkResult eCreateFence(VkDevice device, VkSemaphore* semaphore, int signaled){
     if(signaled){
         fence_create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
     }
-    return vkCreateSemaphore( device, &fence_create_info, NULL, semaphore);
+    return vkCreateFence( device, &fence_create_info, NULL, semaphore);
 }
 
 VkResult eCreateSwapchain(ECSwapchain* ci, VkSwapchainKHR* swapchain){
@@ -530,7 +735,7 @@ VkResult eCreateSwapchain(ECSwapchain* ci, VkSwapchainKHR* swapchain){
             extent.height = capabilities.maxImageExtent.height;
     }
     
-    if(ci->usage = 0) ci->usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    if(ci->usage == 0) ci->usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     VkImageUsageFlags usage = ci->usage;
 
     VkSurfaceTransformFlagBitsKHR swapchain_transform = 0;
@@ -576,7 +781,7 @@ VkResult eCreateSwapchain(ECSwapchain* ci, VkSwapchainKHR* swapchain){
     ci->present_mode = swapchain_present_mode;
     ci->extent = extent;
     ci->format = surface_format; 
-    vkGetSwapchainImagesKHR( ci->device, swapchain, &ci->image_count, NULL );
+    vkGetSwapchainImagesKHR( ci->device, *swapchain, &ci->image_count, NULL );
 }
 
 VkResult eCreateRenderPass(ECRenderPass* ci, VkRenderPass* render_pass){
@@ -597,7 +802,7 @@ VkResult eCreateRenderPass(ECRenderPass* ci, VkRenderPass* render_pass){
             .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
             .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
             .stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-            .stencilStoreOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+            .stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
             .finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
         }
@@ -656,11 +861,6 @@ VkResult eCreateRenderPass(ECRenderPass* ci, VkRenderPass* render_pass){
     return vkCreateRenderPass( ci->device, &vkci, NULL, render_pass);
 }
 
-OC(typedef) struct VertexData {
-    float   x, y, z, w;
-    float   r, g, b, a;
-} OC(VertexData);
-
 VkResult ezCreateQuadVertexBuffer( EState* es, VkBuffer* buffer){
     VkResult r;
     VertexData vertex_data[] = {
@@ -693,15 +893,15 @@ VkResult ezCreateQuadVertexBuffer( EState* es, VkBuffer* buffer){
         .pQueueFamilyIndices = NULL
     };
     r = vkCreateBuffer( es->device, &buffer_create_info, NULL, &es->vertex_buffer);
-    VV(r) VERR("command buffer creation failed");
+    VV(r) return r;
 
     r = eAllocateBufferMemory(es->physical_device, es->device, es->vertex_buffer, &es->vertex_buffer_memory);
-    VV(r) VERR("could not allocate buffer memory");
+    VV(r) return r;
     r = vkBindBufferMemory( es->device, es->vertex_buffer, es->vertex_buffer_memory, 0 );
-    VV(r) VERR("could not bind buffer memory");
+    VV(r) return r;
     void* mem_ptr;
     r = vkMapMemory( es->device, es->vertex_buffer_memory, 0, es->vertex_buffer_size, 0, &mem_ptr );
-    VV(r) VERR("could not map memory");
+    VV(r) return r;
     memcpy( mem_ptr, vertex_data, es->vertex_buffer_size );
     VkMappedMemoryRange flush_range = {
         .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
@@ -734,4 +934,50 @@ VkResult eAllocateBufferMemory( VkPhysicalDevice physical_device, VkDevice devic
         .memoryTypeIndex = i
     };
     return vkAllocateMemory( device, &ai, NULL, memory );
+}
+
+VkResult eCreateCommandPool(VkDevice device, uint32_t queue_family_index, VkCommandPool* command_pool){
+    VkResult r;
+    VkCommandPoolCreateInfo command_pool_create_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .pNext = NULL,
+        .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT | VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+        .queueFamilyIndex = queue_family_index
+    };
+    return vkCreateCommandPool( device, &command_pool_create_info, NULL, command_pool);
+}
+
+VkResult eAllocatePrimaryCommandBuffers(VkDevice device, VkCommandPool pool, uint32_t count, VkCommandBuffer* buffers) {
+    VkCommandBufferAllocateInfo allocate_info = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .pNext = NULL,
+        .commandPool = pool,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = count
+    };
+    return vkAllocateCommandBuffers(device, &allocate_info, buffers);
+}
+
+VkResult eCreateImageViews(VkDevice device, VkSwapchainKHR swapchain, VkFormat format, uint32_t count, VkImageView* views){
+    uint32_t image_count = count;
+    VkImage images[image_count];
+    vkGetSwapchainImagesKHR(device, swapchain, &image_count, images);
+
+    for(size_t i = 0; i < image_count; i++){
+        VkResult r;
+        VkImageViewCreateInfo image_view_create_info = {
+            VSTRUCTC(IMAGE_VIEW)
+            .image = images[i],
+            .viewType = VK_IMAGE_VIEW_TYPE_2D,
+            .format = format,
+            .components = {VSWI, VSWI, VSWI, VSWI},
+            .subresourceRange = {
+                VK_IMAGE_ASPECT_COLOR_BIT,
+                0, 1, 0, 1
+            }
+        };
+        r = vkCreateImageView( device, &image_view_create_info, NULL, &views[i]);
+        VV(r) return r;
+    }
+    return VK_SUCCESS;
 }
