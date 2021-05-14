@@ -383,6 +383,31 @@ VkResult ezDraw(EState* es){
     return r;
 }
 
+VkResult ezDestroyState(EState* es){
+    vkDeviceWaitIdle(es->device);
+    for(int i = 0; i < es->nframe_resources; i++){
+        vkFreeCommandBuffers(es->device, es->command_pool, 1, &es->frame_resources[i].command_buffer);
+        vkDestroySemaphore(es->device, es->frame_resources[i].available_semaphore, NULL);
+        vkDestroySemaphore(es->device, es->frame_resources[i].finished_semaphore, NULL);
+        vkDestroyFence(es->device, es->frame_resources[i].fence, NULL);
+        vkDestroyFramebuffer(es->device, es->frame_resources[i].framebuffer, NULL);
+    }
+    vkDestroyCommandPool(es->device, es->command_pool, NULL);
+    vkDestroyPipeline(es->device, es->pipeline, NULL);
+    vkDestroyRenderPass(es->device, es->render_pass, NULL);
+    uint32_t image_count = 0;
+    vkGetSwapchainImagesKHR(es->device, es->swapchain, &image_count, NULL);
+    for(int i = 0; i < image_count; i++){
+        vkDestroyImageView(es->device, es->image_views[i], NULL);
+    }
+    vkDestroySwapchainKHR(es->device, es->swapchain, NULL);
+    vkDestroySurfaceKHR(es->instance, es->surface, NULL);
+    vkDestroyBuffer(es->device, es->vertex_buffer, NULL);
+    vkFreeMemory(es->device, es->vertex_buffer_memory, NULL);
+    vkDestroyDevice(es->device, NULL);
+    vkDestroyInstance(es->instance, NULL);
+}
+
 VkResult ezPrepareFrame(EState* es, VkCommandBuffer command_buffer, uint32_t image_index, VkFramebuffer* framebuffer){
     // VDBG("Preparing frame");
     VkResult r;

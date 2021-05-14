@@ -19,6 +19,7 @@ VkResult ezCreateQuadVertexBuffer(EState* es, VkBuffer* w);
 VkResult ezCreatePipeline(EState* es, VkPipeline* pipeline);
 VkResult ezCreateSwapchainImageViews(EState* es);
 VkResult ezDraw(EState* es);
+VkResult ezDestroyState(EState* es);
 VkResult ezPrepareFrame(EState* es, VkCommandBuffer command_buffer, uint32_t image_index, VkFramebuffer* framebuffer);
 EResult eChoosePhysicalDevice(const EDeviceRequirements* req, EState* e);
 VkResult eCreatePresentSurface(EState* es, EWindowState* w);

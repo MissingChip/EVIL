@@ -35,8 +35,8 @@ struct EState {
     VkExtent2D extent;
     VkPhysicalDevice physical_device;
     VkDevice device;
-    VkSwapchainKHR swapchain;
     VkSurfaceKHR surface;
+    VkSwapchainKHR swapchain;
     VkSurfaceFormatKHR surface_format;
     uint32_t graphics_queue_family;
     uint32_t present_queue_family;

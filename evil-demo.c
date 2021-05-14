@@ -16,6 +16,7 @@ int main(int argc, char** argv){
         quit = update_x(&state, &window_state);
         ezDraw(&state);
     }
+    ezDestroyState(&state);
 }
 
 int update_x(EState* v, EWindowState* x){
@@ -46,7 +47,7 @@ int update_x(EState* v, EWindowState* x){
                 }
                 break;
             default:
-                printf("Unknown case: %x", event->response_type & 0x7f);
+                printf("Unknown case: %x\n", event->response_type & 0x7f);
                 break;
         }
         free(event);
