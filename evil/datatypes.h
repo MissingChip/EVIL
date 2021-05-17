@@ -2,6 +2,8 @@
 
 #include <xcb/xcb.h>
 
+#include "vma/include/vk_mem_alloc.h"
+
 #include "evil/utility.h"
 #include "evil/vulkan_utility.h"
 
@@ -20,6 +22,12 @@ struct EGraphicsPresent {
     VkQueue present;
 };
 unstruct(EGraphicsPresent);
+
+struct EBuffer {
+    VkBuffer buffer;
+    VmaAllocation allocation;
+};
+unstruct(EBuffer);
 
 struct EFrameResources {
     VkCommandBuffer command_buffer;
@@ -42,6 +50,8 @@ struct EState {
     uint32_t present_queue_family;
     EGraphicsPresent queues;
     uint32_t vertex_buffer_size;
+    VkBuffer staging_buffer;
+    VkDeviceMemory staging_buffer_memory;
     VkBuffer vertex_buffer;
     VkDeviceMemory vertex_buffer_memory;
     VkRenderPass render_pass;

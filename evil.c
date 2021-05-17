@@ -74,7 +74,6 @@ VkResult ezInitialize(EState* es, EWindowState* w){
     };
     eCreateRenderPass(&render_pass_ci, &es->render_pass);
     ezCreatePipeline(es, &es->pipeline);
-    ezCreateQuadVertexBuffer(es, &es->vertex_buffer);
     eCreateCommandPool( es->device, es->graphics_queue_family, &es->command_pool );
     for(int i = 0; i < es->nframe_resources; i++){
         eCreateSemaphore(es->device, &es->frame_resources[i].available_semaphore);
@@ -82,6 +81,7 @@ VkResult ezInitialize(EState* es, EWindowState* w){
         eCreateFence(es->device, &es->frame_resources[i].fence, 1);
         eAllocatePrimaryCommandBuffers(es->device, es->command_pool, 1, &es->frame_resources[i].command_buffer);
     }
+    ezCreateQuadVertexBuffer(es, &es->vertex_buffer);
 }
 
 EResult eCheckForInstanceExtensions(uint32_t extension_count, const char* instance_extensions[]){
@@ -695,13 +695,38 @@ VkResult eCreateSemaphore(VkDevice device, VkSemaphore* semaphore){
 
 VkResult eCreateFence(VkDevice device, VkFence* semaphore, int signaled){
     VkFenceCreateInfo fence_create_info = {
-        VSTRUCTF(FENCE)
-        .flags = 0
+        VSTRUCTC(FENCE)
     };
     if(signaled){
         fence_create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
     }
     return vkCreateFence( device, &fence_create_info, NULL, semaphore);
+}
+
+VkResult eCreateBuffer(VkPhysicalDevice physical_device, VkDevice device, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags flags, VkBuffer* buffer, VkDeviceMemory* memory){
+    VkBufferCreateInfo buffer_create_info = {
+        VSTRUCTC(BUFFER)
+        .size = size,
+        .usage = usage,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = 0,
+        .pQueueFamilyIndices = NULL
+    };
+    vkCreateBuffer( device, &buffer_create_info, NULL, buffer);
+    eAllocateBufferMemory(physical_device, device, *buffer, flags, memory);
+    vkBindBufferMemory( device, *buffer, *memory, 0 );
+}
+
+VkResult eCreateSharedBuffer(VkPhysicalDevice physical_device, VkDevice device, VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags flags, uint32_t queue_family_count, uint32_t* queue_families, VkBuffer* buffer, VkDeviceMemory* memory){
+    VkBufferCreateInfo buffer_create_info = {
+        VSTRUCTC(BUFFER)
+        .size = size,
+        .usage = usage,
+        .sharingMode = VK_SHARING_MODE_CONCURRENT,
+        .queueFamilyIndexCount = queue_family_count,
+        .pQueueFamilyIndices = queue_families
+    };
+    return vkCreateBuffer( device, &buffer_create_info, NULL, buffer);
 }
 
 VkResult eCreateSwapchain(ECSwapchain* ci, VkSwapchainKHR* swapchain){
@@ -908,39 +933,64 @@ VkResult ezCreateQuadVertexBuffer( EState* es, VkBuffer* buffer){
     };
     es->vertex_buffer_size = sizeof(vertex_data);
 
+    eCreateBuffer(es->physical_device, es->device, es->vertex_buffer_size, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, &es->vertex_buffer, &es->vertex_buffer_memory);
+    eCreateBuffer(es->physical_device, es->device, es->vertex_buffer_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, &es->staging_buffer, &es->staging_buffer_memory);
     
-    VkBufferCreateInfo buffer_create_info = {
-        VSTRUCTC(BUFFER)
-        .size = es->vertex_buffer_size,
-        .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
-        .queueFamilyIndexCount = 0,
-        .pQueueFamilyIndices = NULL
-    };
-    r = vkCreateBuffer( es->device, &buffer_create_info, NULL, &es->vertex_buffer);
-    VV(r) return r;
-
-    r = eAllocateBufferMemory(es->physical_device, es->device, es->vertex_buffer, &es->vertex_buffer_memory);
-    VV(r) return r;
-    r = vkBindBufferMemory( es->device, es->vertex_buffer, es->vertex_buffer_memory, 0 );
-    VV(r) return r;
     void* mem_ptr;
-    r = vkMapMemory( es->device, es->vertex_buffer_memory, 0, es->vertex_buffer_size, 0, &mem_ptr );
+    r = vkMapMemory( es->device, es->staging_buffer_memory, 0, es->vertex_buffer_size, 0, &mem_ptr );
     VV(r) return r;
     memcpy( mem_ptr, vertex_data, es->vertex_buffer_size );
     VkMappedMemoryRange flush_range = {
         .sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE,
         .pNext = NULL,
-        .memory = es->vertex_buffer_memory,
+        .memory = es->staging_buffer_memory,
         .offset = 0,
         .size = VK_WHOLE_SIZE
     };
     vkFlushMappedMemoryRanges( es->device, 1, &flush_range );
-    vkUnmapMemory( es->device, es->vertex_buffer_memory );
+    vkUnmapMemory( es->device, es->staging_buffer_memory );
+
+    VkCommandBufferBeginInfo command_buffer_bi = {
+        VSTRUCT(COMMAND_BUFFER_BEGIN_INFO)
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        .pInheritanceInfo = NULL
+    };
+    VkCommandBuffer command_buffer = es->frame_resources[0].command_buffer;
+    vkBeginCommandBuffer(command_buffer, &command_buffer_bi);
+    VkBufferCopy copy_info = {
+        0,
+        0,
+        es->vertex_buffer_size
+    };
+    vkCmdCopyBuffer( command_buffer, es->staging_buffer, es->vertex_buffer, 1, &copy_info);
+    VkBufferMemoryBarrier memory_barrier = {
+        VSTRUCT(BUFFER_MEMORY_BARRIER)
+        .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
+        .dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = es->vertex_buffer,
+        0,
+        VK_WHOLE_SIZE
+    };
+    vkCmdPipelineBarrier( command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0, 0, NULL, 1, &memory_barrier, 0, NULL);
+    vkEndCommandBuffer(command_buffer);
+    VkSubmitInfo submit_info = {
+        VSTRUCT(SUBMIT_INFO)
+        .waitSemaphoreCount = 0,
+        .pWaitSemaphores = NULL,
+        .pWaitDstStageMask = NULL,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &command_buffer,
+        .signalSemaphoreCount = 0,
+        .pSignalSemaphores = NULL
+    };
+    vkQueueSubmit( es->queues.graphics, 1, &submit_info, VK_NULL_HANDLE );
+    vkDeviceWaitIdle(es->device);
     return VK_SUCCESS;
 }
 
-VkResult eAllocateBufferMemory( VkPhysicalDevice physical_device, VkDevice device, VkBuffer buffer, VkDeviceMemory* memory ){
+VkResult eAllocateBufferMemory( VkPhysicalDevice physical_device, VkDevice device, VkBuffer buffer, VkMemoryPropertyFlags flags, VkDeviceMemory* memory ){
     VkMemoryRequirements requirements;
     vkGetBufferMemoryRequirements( device, buffer, &requirements );
     VkPhysicalDeviceMemoryProperties properties;
@@ -948,7 +998,7 @@ VkResult eAllocateBufferMemory( VkPhysicalDevice physical_device, VkDevice devic
     uint32_t i = 0;
     for( ; i < properties.memoryTypeCount; i++ ){
         if((requirements.memoryTypeBits & (1 << i)) && 
-                properties.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT) {
+                ((properties.memoryTypes[i].propertyFlags & flags) == flags)) {
             break;
         }
     }
