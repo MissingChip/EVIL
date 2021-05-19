@@ -1,8 +1,11 @@
 
-demo: frag.spv vert.spv
+demo: frag.spv vert.spv vma.o
 	gcc -c evil.c -lvulkan -I. -g
-	gcc evil-demo.c evil.o -lvulkan -lxcb -I. -g -o demo.e
+	g++ evil-demo.c evil.o vma.o -lvulkan -lxcb -I. -g -o demo.e
 .PHONY: demo
+
+vma.o: vma.cpp
+	g++ -c $< -o $@
 
 frag.spv: frag.glsl
 	glslc -fshader-stage=frag $^ -o $@

@@ -23,9 +23,11 @@ struct EGraphicsPresent {
 };
 unstruct(EGraphicsPresent);
 
+typedef VmaAllocation EAllocation;
+
 struct EBuffer {
-    VkBuffer buffer;
-    VmaAllocation allocation;
+    VkBuffer handle;
+    EAllocation allocation;
 };
 unstruct(EBuffer);
 
@@ -38,22 +40,28 @@ struct EFrameResources {
 };
 unstruct(EFrameResources);
 
+struct EInstance {
+    VkInstance instance;
+    VkPhysicalDevice physical_device;
+    VkDevice device;
+    VmaAllocator allocator;
+};
+unstruct(EInstance);
+
 struct EState {
     VkInstance instance;
     VkExtent2D extent;
     VkPhysicalDevice physical_device;
     VkDevice device;
+    VmaAllocator allocator;
     VkSurfaceKHR surface;
     VkSwapchainKHR swapchain;
     VkSurfaceFormatKHR surface_format;
     uint32_t graphics_queue_family;
     uint32_t present_queue_family;
     EGraphicsPresent queues;
-    uint32_t vertex_buffer_size;
-    VkBuffer staging_buffer;
-    VkDeviceMemory staging_buffer_memory;
-    VkBuffer vertex_buffer;
-    VkDeviceMemory vertex_buffer_memory;
+    EBuffer staging_buffer;
+    EBuffer vertex_buffer;
     VkRenderPass render_pass;
     VkPipeline pipeline;
     VkCommandPool command_pool;
@@ -70,6 +78,18 @@ struct EWindowState {
     VkExtent2D extent;
 };
 unstruct(EWindowState);
+
+struct ECBuffer {
+    EInstance e;
+    VkBufferCreateFlags flags;
+    VkDeviceSize size;
+    VkBufferUsageFlags usage;
+    VkSharingMode sharing_mode;
+    uint32_t family_index_count;
+    const uint32_t* family_indices;
+    VmaAllocationCreateInfo allocation_info;
+};
+unstruct(ECBuffer);
 
 struct ECSwapchain {
     VkPhysicalDevice physical_device;

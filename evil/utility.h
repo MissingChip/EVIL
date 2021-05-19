@@ -4,6 +4,7 @@
 #define TYPEDEF
 #define OC(...)
 #define unstruct(X)
+#define unenum(X)
 #else
 #define TYPEDEF typedef
 #define OC(...) __VA_ARGS__

@@ -29,12 +29,13 @@ int update_x(EState* v, EWindowState* x){
     free( protocols_reply );
     xcb_configure_notify_event_t *configure_event;
     int quit = 0;
+    uint16_t width, height;
     while(event = xcb_poll_for_event(x->connection)){
         switch (event->response_type & 0x7f) {
             case XCB_CONFIGURE_NOTIFY:
                 configure_event = (xcb_configure_notify_event_t*)event;
-                uint16_t width = configure_event->width;
-                uint16_t height = configure_event->height;
+                width = configure_event->width;
+                height = configure_event->height;
                 if((width > 0 && width != v->extent.width) || (height > 0 && height != v->extent.height)){
                     v->extent.width = width;
                     v->extent.height = height;
