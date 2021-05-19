@@ -40,7 +40,7 @@ VkResult ezInitialize(EState* es, EWindowState* w){
     memset(es, 0, sizeof(*es));
     es->extent = w->extent;
     es->nframe_resources = FRAME_RESOURCE_COUNT;
-    ezCreateInstance(&es->instance);
+    ezCreateInstance(&es->instance.handle);
     eCreatePresentSurface(es, w);
     EDeviceRequirements device_requirements = {
         .prefer_discrete = 1.0,
@@ -55,14 +55,14 @@ VkResult ezInitialize(EState* es, EWindowState* w){
     eCreateLogicalDevice(es, &device_extensions);
     VmaAllocatorCreateInfo allocator_info = {
         .vulkanApiVersion = VK_API_VERSION,
-        .physicalDevice = es->physical_device,
-        .device = es->device,
-        .instance = es->instance
+        .physicalDevice = es->instance.physical_device,
+        .device = es->instance.device,
+        .instance = es->instance.handle
     };
-    vmaCreateAllocator(&allocator_info, &es->allocator);
+    vmaCreateAllocator(&allocator_info, &es->instance.allocator);
     ECSwapchain swapchain_ci = {
-        .physical_device = es->physical_device,
-        .device = es->device,
+        .physical_device = es->instance.physical_device,
+        .device = es->instance.device,
         .surface = es->surface,
         .extent = es->extent,
         .present_mode = VK_PRESENT_MODE_MAILBOX_KHR,
@@ -76,17 +76,17 @@ VkResult ezInitialize(EState* es, EWindowState* w){
     es->surface_format = swapchain_ci.format;
     ezCreateSwapchainImageViews(es);
     ECRenderPass render_pass_ci = {
-        .device = es->device,
+        .device = es->instance.device,
         .format = swapchain_ci.format.format
     };
     eCreateRenderPass(&render_pass_ci, &es->render_pass);
     ezCreatePipeline(es, &es->pipeline);
-    eCreateCommandPool( es->device, es->graphics_queue_family, &es->command_pool );
+    eCreateCommandPool( es->instance.device, es->graphics_queue_family, &es->command_pool );
     for(int i = 0; i < es->nframe_resources; i++){
-        eCreateSemaphore(es->device, &es->frame_resources[i].available_semaphore);
-        eCreateSemaphore(es->device, &es->frame_resources[i].finished_semaphore);
-        eCreateFence(es->device, &es->frame_resources[i].fence, 1);
-        eAllocatePrimaryCommandBuffers(es->device, es->command_pool, 1, &es->frame_resources[i].command_buffer);
+        eCreateSemaphore(es->instance.device, &es->frame_resources[i].available_semaphore);
+        eCreateSemaphore(es->instance.device, &es->frame_resources[i].finished_semaphore);
+        eCreateFence(es->instance.device, &es->frame_resources[i].fence, 1);
+        eAllocatePrimaryCommandBuffers(es->instance.device, es->command_pool, 1, &es->frame_resources[i].command_buffer);
     }
     ezCreateQuadVertexBuffer(es, &es->vertex_buffer);
 }
@@ -165,14 +165,14 @@ VkShaderModule eCreateShaderModuleFromFile(VkDevice device, const char* filename
 
 VkResult ezCreateSwapchainImageViews(EState* es){
     uint32_t image_count = 0;
-    vkGetSwapchainImagesKHR(es->device, es->swapchain, &image_count, NULL);
-    return eCreateImageViews(es->device, es->swapchain, es->surface_format.format, image_count, es->image_views);
+    vkGetSwapchainImagesKHR(es->instance.device, es->swapchain, &image_count, NULL);
+    return eCreateImageViews(es->instance.device, es->swapchain, es->surface_format.format, image_count, es->image_views);
 }
 
 VkResult ezCreatePipeline(EState* es, VkPipeline* pipeline){
     VkResult r;
-    VkShaderModule vert = eCreateShaderModuleFromFile(es->device, "vert.spv");
-    VkShaderModule frag = eCreateShaderModuleFromFile(es->device, "frag.spv");
+    VkShaderModule vert = eCreateShaderModuleFromFile(es->instance.device, "vert.spv");
+    VkShaderModule frag = eCreateShaderModuleFromFile(es->instance.device, "frag.spv");
 
     VkPipelineShaderStageCreateInfo shader_stage_create_infos[] = {
         {
@@ -292,7 +292,7 @@ VkResult ezCreatePipeline(EState* es, VkPipeline* pipeline){
         .pPushConstantRanges = NULL
     };
     VkPipelineLayout pipeline_layout;
-    r = vkCreatePipelineLayout( es->device, &layout_create_info, NULL, &pipeline_layout);
+    r = vkCreatePipelineLayout( es->instance.device, &layout_create_info, NULL, &pipeline_layout);
     VV(r) return r;
 
     VkGraphicsPipelineCreateInfo pipeline_create_info = {
@@ -314,19 +314,19 @@ VkResult ezCreatePipeline(EState* es, VkPipeline* pipeline){
         .basePipelineHandle = VK_NULL_HANDLE,
         .basePipelineIndex = -1
     };
-    r = vkCreateGraphicsPipelines( es->device, VK_NULL_HANDLE, 1, &pipeline_create_info, NULL, &es->pipeline );
+    r = vkCreateGraphicsPipelines( es->instance.device, VK_NULL_HANDLE, 1, &pipeline_create_info, NULL, &es->pipeline );
     VV(r) return r;
 
-    vkDestroyPipelineLayout(es->device, pipeline_layout, NULL);
-    vkDestroyShaderModule(es->device, vert, NULL);
-    vkDestroyShaderModule(es->device, frag, NULL);
+    vkDestroyPipelineLayout(es->instance.device, pipeline_layout, NULL);
+    vkDestroyShaderModule(es->instance.device, vert, NULL);
+    vkDestroyShaderModule(es->instance.device, frag, NULL);
 }
 
 VkResult ezDraw(EState* es){
     static size_t resource_index = 0;
 
     VkResult r;
-    VkDevice device = es->device;
+    VkDevice device = es->instance.device;
     VkSwapchainKHR swapchain = es->swapchain;
     EFrameResources* current = &es->frame_resources[resource_index];
     uint32_t image_index;
@@ -391,42 +391,43 @@ VkResult ezDraw(EState* es){
 }
 
 VkResult ezDestroyState(EState* es){
-    vkDeviceWaitIdle(es->device);
+    VkDevice device = es->instance.device;
+    vkDeviceWaitIdle(device);
     for(int i = 0; i < es->nframe_resources; i++){
-        vkFreeCommandBuffers(es->device, es->command_pool, 1, &es->frame_resources[i].command_buffer);
-        vkDestroySemaphore(es->device, es->frame_resources[i].available_semaphore, NULL);
-        vkDestroySemaphore(es->device, es->frame_resources[i].finished_semaphore, NULL);
-        vkDestroyFence(es->device, es->frame_resources[i].fence, NULL);
-        vkDestroyFramebuffer(es->device, es->frame_resources[i].framebuffer, NULL);
+        vkFreeCommandBuffers(device, es->command_pool, 1, &es->frame_resources[i].command_buffer);
+        vkDestroySemaphore(device, es->frame_resources[i].available_semaphore, NULL);
+        vkDestroySemaphore(device, es->frame_resources[i].finished_semaphore, NULL);
+        vkDestroyFence(device, es->frame_resources[i].fence, NULL);
+        vkDestroyFramebuffer(device, es->frame_resources[i].framebuffer, NULL);
     }
-    vkDestroyCommandPool(es->device, es->command_pool, NULL);
-    vkDestroyPipeline(es->device, es->pipeline, NULL);
-    vkDestroyRenderPass(es->device, es->render_pass, NULL);
+    vkDestroyCommandPool(device, es->command_pool, NULL);
+    vkDestroyPipeline(device, es->pipeline, NULL);
+    vkDestroyRenderPass(device, es->render_pass, NULL);
     uint32_t image_count = 0;
-    vkGetSwapchainImagesKHR(es->device, es->swapchain, &image_count, NULL);
+    vkGetSwapchainImagesKHR(device, es->swapchain, &image_count, NULL);
     for(int i = 0; i < image_count; i++){
-        vkDestroyImageView(es->device, es->image_views[i], NULL);
+        vkDestroyImageView(device, es->image_views[i], NULL);
     }
-    vkDestroySwapchainKHR(es->device, es->swapchain, NULL);
-    vkDestroySurfaceKHR(es->instance, es->surface, NULL);
-    EInstance ei = {es->instance, es->physical_device, es->device, es->allocator};
+    vkDestroySwapchainKHR(device, es->swapchain, NULL);
+    vkDestroySurfaceKHR(es->instance.handle, es->surface, NULL);
+    EInstance ei = {es->instance.handle, es->instance.physical_device, device, es->instance.allocator};
     eDestroyBuffer(&ei, es->vertex_buffer);
     eDestroyBuffer(&ei, es->staging_buffer);
-    vmaDestroyAllocator(es->allocator);
-    vkDestroyDevice(es->device, NULL);
-    vkDestroyInstance(es->instance, NULL);
+    vmaDestroyAllocator(es->instance.allocator);
+    vkDestroyDevice(device, NULL);
+    vkDestroyInstance(es->instance.handle, NULL);
 }
 
 VkResult ezPrepareFrame(EState* es, VkCommandBuffer command_buffer, uint32_t image_index, VkFramebuffer* framebuffer){
     // VDBG("Preparing frame");
     VkResult r;
     uint32_t image_count = 0;
-    vkGetSwapchainImagesKHR( es->device, es->swapchain, &image_count, NULL);
+    vkGetSwapchainImagesKHR( es->instance.device, es->swapchain, &image_count, NULL);
     VkImage images[image_count];
-    vkGetSwapchainImagesKHR( es->device, es->swapchain, &image_count, images);
+    vkGetSwapchainImagesKHR( es->instance.device, es->swapchain, &image_count, images);
 
     if(*framebuffer != VK_NULL_HANDLE){
-        vkDestroyFramebuffer( es->device, *framebuffer, NULL );
+        vkDestroyFramebuffer( es->instance.device, *framebuffer, NULL );
         *framebuffer = VK_NULL_HANDLE;
     }
 
@@ -440,7 +441,7 @@ VkResult ezPrepareFrame(EState* es, VkCommandBuffer command_buffer, uint32_t ima
         .layers = 1
     };
 
-    r = vkCreateFramebuffer( es->device, &framebuffer_create_info, NULL, framebuffer );
+    r = vkCreateFramebuffer( es->instance.device, &framebuffer_create_info, NULL, framebuffer );
     VV(r) return r;
 
     VkCommandBufferBeginInfo command_buffer_begin_info = {
@@ -570,14 +571,14 @@ VkResult eCreatePresentSurface(EState* vs, EWindowState* w){
         w->connection,
         w->window
     };
-    return vkCreateXcbSurfaceKHR(vs->instance, &surface_create_info, NULL, &vs->surface);
+    return vkCreateXcbSurfaceKHR(vs->instance.handle, &surface_create_info, NULL, &vs->surface);
 }
 
 EResult eChoosePhysicalDevice(const EDeviceRequirements* req, EState* v){
     uint32_t device_count = 0;
-    vkEnumeratePhysicalDevices(v->instance, &device_count, NULL);
+    vkEnumeratePhysicalDevices(v->instance.handle, &device_count, NULL);
     VkPhysicalDevice physical_devices[device_count];
-    vkEnumeratePhysicalDevices(v->instance, &device_count, physical_devices);
+    vkEnumeratePhysicalDevices(v->instance.handle, &device_count, physical_devices);
     float max_score = -INFINITY;
     uint32_t max_score_idx = 0;
     for(int i = 0; i < device_count; i++){
@@ -614,19 +615,19 @@ EResult eChoosePhysicalDevice(const EDeviceRequirements* req, EState* v){
     if(max_score == -INFINITY){
         return E_NO_SUITABLE_DEVICE;
     }
-    v->physical_device = physical_devices[max_score_idx];
+    v->instance.physical_device = physical_devices[max_score_idx];
     return E_SUCCESS;
 }
 
 EResult eChooseQueueFamily(EState* vs){
     u32 gq = BAD, pq = BAD;
     u32 count = 0;
-    vkGetPhysicalDeviceQueueFamilyProperties( vs->physical_device, &count, NULL );
+    vkGetPhysicalDeviceQueueFamilyProperties( vs->instance.physical_device, &count, NULL );
     VkQueueFamilyProperties properties[count];
-    vkGetPhysicalDeviceQueueFamilyProperties( vs->physical_device, &count, properties );
+    vkGetPhysicalDeviceQueueFamilyProperties( vs->instance.physical_device, &count, properties );
     VkBool32 present_support[count];
     for(u32 i = 0; i < count; i++){
-        vkGetPhysicalDeviceSurfaceSupportKHR( vs->physical_device, i, vs->surface, &present_support[i] );
+        vkGetPhysicalDeviceSurfaceSupportKHR( vs->instance.physical_device, i, vs->surface, &present_support[i] );
         if( properties[i].queueFlags & VK_QUEUE_GRAPHICS_BIT ){
             if( gq == BAD ){
                 gq = i;
@@ -678,10 +679,10 @@ EResult eCreateLogicalDevice(EState* vs, EExtras* extras){
         device_ci.enabledLayerCount = extras->layer_count;
         device_ci.ppEnabledLayerNames = extras->layers;
     }
-    vkCreateDevice( vs->physical_device, &device_ci, NULL, &vs->device);
-    vkGetDeviceQueue( vs->device, vs->graphics_queue_family, 0, &vs->queues.graphics);
+    vkCreateDevice( vs->instance.physical_device, &device_ci, NULL, &vs->instance.device);
+    vkGetDeviceQueue( vs->instance.device, vs->graphics_queue_family, 0, &vs->queues.graphics);
     if(number_of_queues > 1){
-        vkGetDeviceQueue( vs->device, vs->present_queue_family, 0, &vs->queues.present );
+        vkGetDeviceQueue( vs->instance.device, vs->present_queue_family, 0, &vs->queues.present );
     }
     else{
         vs->queues.present = vs->queues.graphics;
@@ -956,7 +957,7 @@ VkResult ezCreateQuadVertexBuffer( EState* es, EBuffer* buffer){
     size_t vbsize = sizeof(vertex_data);
 
     ECBuffer buffer_ci = {
-        .e = {es->instance, es->physical_device, es->device, es->allocator},
+        .e = es->instance,
         .flags = 0,
         .size = vbsize,
         .usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 
@@ -975,12 +976,11 @@ VkResult ezCreateQuadVertexBuffer( EState* es, EBuffer* buffer){
     eCreateBuffer(&buffer_ci, &es->staging_buffer);
     
     void* mem_ptr;
-    EInstance ei = {es->instance, es->physical_device, es->device, es->allocator};
-    r = eMapBufferMemory( &ei, es->staging_buffer, &mem_ptr );
+    r = eMapBufferMemory( &es->instance, es->staging_buffer, &mem_ptr );
     VV(r) return r;
     memcpy( mem_ptr, vertex_data, vbsize );
-    eFlushMappedBuffer(&ei, es->staging_buffer );
-    eUnmapBufferMemory( &ei, es->staging_buffer );
+    eFlushMappedBuffer(&es->instance, es->staging_buffer );
+    eUnmapBufferMemory( &es->instance, es->staging_buffer );
 
     VkCommandBufferBeginInfo command_buffer_bi = {
         VSTRUCT(COMMAND_BUFFER_BEGIN_INFO)
@@ -1018,7 +1018,7 @@ VkResult ezCreateQuadVertexBuffer( EState* es, EBuffer* buffer){
         .pSignalSemaphores = NULL
     };
     vkQueueSubmit( es->queues.graphics, 1, &submit_info, VK_NULL_HANDLE );
-    vkDeviceWaitIdle(es->device);
+    vkDeviceWaitIdle(es->instance.device);
     return VK_SUCCESS;
 }
 

@@ -41,7 +41,7 @@ struct EFrameResources {
 unstruct(EFrameResources);
 
 struct EInstance {
-    VkInstance instance;
+    VkInstance handle;
     VkPhysicalDevice physical_device;
     VkDevice device;
     VmaAllocator allocator;
@@ -49,11 +49,8 @@ struct EInstance {
 unstruct(EInstance);
 
 struct EState {
-    VkInstance instance;
+    EInstance instance;
     VkExtent2D extent;
-    VkPhysicalDevice physical_device;
-    VkDevice device;
-    VmaAllocator allocator;
     VkSurfaceKHR surface;
     VkSwapchainKHR swapchain;
     VkSurfaceFormatKHR surface_format;
