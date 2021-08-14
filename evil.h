@@ -21,6 +21,7 @@ VkResult ezCreateSwapchainImageViews(EState* es);
 VkResult ezDraw(EState* es);
 VkResult ezDestroyState(EState* es);
 VkResult ezPrepareFrame(EState* es, VkCommandBuffer command_buffer, uint32_t image_index, VkFramebuffer* framebuffer);
+VkResult ezCreateImage(EState* es);
 EResult eChoosePhysicalDevice(const EDeviceRequirements* req, EState* e);
 VkResult eCreatePresentSurface(EState* es, EWindowState* w);
 EResult eChooseQueueFamily(EState* es);

@@ -65,6 +65,7 @@ struct EState {
     uint32_t nframe_resources;
     EFrameResources frame_resources[FRAME_RESOURCE_COUNT];
     VkImageView image_views[16];
+    VkImage test_image;
 };
 unstruct(EState);
 

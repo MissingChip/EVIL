@@ -82,6 +82,7 @@ VkResult ezInitialize(EState* es, EWindowState* w){
     eCreateRenderPass(&render_pass_ci, &es->render_pass);
     ezCreatePipeline(es, &es->pipeline);
     eCreateCommandPool( es->instance.device, es->graphics_queue_family, &es->command_pool );
+    ezCreateImage( es );
     for(int i = 0; i < es->nframe_resources; i++){
         eCreateSemaphore(es->instance.device, &es->frame_resources[i].available_semaphore);
         eCreateSemaphore(es->instance.device, &es->frame_resources[i].finished_semaphore);
@@ -523,6 +524,25 @@ VkResult ezPrepareFrame(EState* es, VkCommandBuffer command_buffer, uint32_t ima
         vkCmdPipelineBarrier( command_buffer, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, NULL, 0, NULL, 1, &barrier_present_draw );
     }
     return vkEndCommandBuffer( command_buffer );
+}
+
+VkResult ezCreateImage(EState* es){
+    VkImageCreateInfo image_create_info = {
+        VSTRUCTC(IMAGE)
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = VK_FORMAT_R8G8B8A8_UNORM,
+        .extent = {es->extent.width, es->extent.height, 1},
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = VK_SAMPLE_COUNT_1_BIT,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+        .queueFamilyIndexCount = 0,
+        .pQueueFamilyIndices = NULL,
+        .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED
+    };
+    
 }
 
 VkResult eCreateWindow(VkExtent2D* extent, EWindowState* w){
